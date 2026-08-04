@@ -76,6 +76,22 @@ addopts = "-m 'not live'"
 source = ["src/gscrape"]
 omit = ["src/gscrape/cli.py"]
 
+[tool.ty.environment]
+# Check against the oldest supported interpreter, not the one that happens to
+# be installed: a 3.12-only construct must fail here, not in a user's 3.11.
+python-version = "3.11"
+
+[tool.ty.terminal]
+error-on-warning = true
+
+[tool.ty.rules]
+# Payload parsers are full of conditional bindings; an unbound name there would
+# surface as a NameError in the middle of a long run.
+possibly-unresolved-reference = "error"
+unused-ignore-comment = "error"
+redundant-cast = "error"
+division-by-zero = "error"
+
 [tool.ruff]
 line-length = 90
 target-version = "py311"

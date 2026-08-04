@@ -264,6 +264,21 @@ class Maps(Service):
             f"&pb={PB_FALLBACK.format(query=urllib.parse.quote(query))}"
         )
 
+    def _search_page(self, url: str) -> Any:
+        """Fetch and parse one results page, re-bootstrapping once if needed.
+
+        A non-JSON body means consent, captcha or an HTML error page — i.e. the
+        session went bad. Swallowing that as "no results" is the worst failure
+        mode for a batch matcher: it silently turns every row into a no-match.
+        So: retry once with a fresh jar, then let the `ParseError` out.
+        """
+        try:
+            return parse_json(self.client.get(url), what="tbm=map")
+        except ParseError:
+            self.client.log("search returned non-JSON, re-bootstrapping")
+            self.bootstrap(force=True)
+            return parse_json(self.client.get(url), what="tbm=map")
+
     def search(
         self,
         query: str,
@@ -286,22 +301,7 @@ class Maps(Service):
         offset = start
         while len(out) < limit:
             url = base if not offset else _with_offset(base, offset)
-            # A non-JSON body means consent/captcha/HTML, i.e. the session went
-            # bad. Swallowing that as "no results" is the worst failure mode for
-            # a batch matcher: it silently turns every row into a no-match.
-            # Re-bootstrap once, then surface the problem.
-            for attempt in (0, 1):
-                try:
-                    data = parse_json(self.client.get(url), what="tbm=map")
-                    break
-                except ParseError:
-                    if attempt == 0:
-                        self.client.log("search returned non-JSON, re-bootstrapping")
-                        self.bootstrap(force=True)
-                        continue
-                    raise
-
-            page = find_places(data)
+            page = find_places(self._search_page(url))
             if not page:
                 break
             fresh = 0
