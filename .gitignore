@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+wheels/
+
+# Environments
+.venv/
+.env
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Local scratch space and editor state
+_scratch/
+.playwright-mcp/
+session.txt
+.idea/
+.vscode/
+
+# Build output
+dist/

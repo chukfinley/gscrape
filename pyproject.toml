@@ -1,0 +1,108 @@
+[project]
+name = "gscrape"
+version = "0.1.0"
+description = "Fast pure-HTTP scrapers for Google's public surfaces: Search, Maps, YouTube, Trends, News, Images, Suggest. No browser."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "chukfinley" }]
+keywords = [
+    "google",
+    "scraper",
+    "serp",
+    "google-maps",
+    "google-trends",
+    "youtube",
+    "keyword-research",
+    "curl-cffi",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "curl-cffi>=0.7",
+    "selectolax>=0.3.21",
+]
+
+[project.urls]
+Homepage = "https://github.com/chukfinley/gscrape"
+Documentation = "https://github.com/chukfinley/gscrape/tree/main/docs"
+Repository = "https://github.com/chukfinley/gscrape"
+Issues = "https://github.com/chukfinley/gscrape/issues"
+Changelog = "https://github.com/chukfinley/gscrape/blob/main/CHANGELOG.md"
+
+[project.scripts]
+gscrape = "gscrape.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "ruff>=0.16.1",
+    "ty>=0.0.66",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gscrape"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "docs", "README.md", "CHANGELOG.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "live: hits the real Google servers (deselect with -m 'not live')",
+]
+# Live tests are opt-in: they need network, they cost rate-limit budget, and
+# they fail for reasons that are not the code's fault.
+addopts = "-m 'not live'"
+
+[tool.coverage.run]
+source = ["src/gscrape"]
+omit = ["src/gscrape/cli.py"]
+
+[tool.ruff]
+line-length = 90
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "SIM",  # simplify
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "E501",    # line length is handled by the formatter
+    "B008",    # calls in defaults are deliberate in a few spots
+    "SIM108",  # ternaries are not always clearer
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests hold payload constants as class attributes (RUF012), probe attribute
+# access inside `pytest.raises` (B018), and embed Google's own breadcrumb
+# characters in HTML fixtures (RUF001).
+"tests/*" = ["RUF012", "B018", "RUF001"]
+
+[tool.ruff.format]
+docstring-code-format = true

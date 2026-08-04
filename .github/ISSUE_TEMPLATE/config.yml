@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: How a surface was reverse engineered
+    url: https://github.com/chukfinley/gscrape/blob/main/docs/REVERSE-ENGINEERING.md
+    about: The method, every known gate, and how to re-crack one yourself.
+  - name: Surface reference
+    url: https://github.com/chukfinley/gscrape/blob/main/docs/SURFACES.md
+    about: Endpoints, parameters, payload shapes and rate limits per scraper.
+  - name: Questions and ideas
+    url: https://github.com/chukfinley/gscrape/discussions
+    about: Anything that is not a bug report or a concrete request.

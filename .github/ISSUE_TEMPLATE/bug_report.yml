@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in the library behaves incorrectly (not a Google-side change).
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the traceback if there is one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproducer
+      render: python
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: gscrape version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version and OS
+      placeholder: "3.13 on Ubuntu 24.04"
+    validations:
+      required: true

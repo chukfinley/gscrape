@@ -1,0 +1,71 @@
+name: A surface stopped working
+description: Google changed something and a scraper returns nothing, or the wrong thing.
+title: "[broken] "
+labels: ["surface-broken"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most common issue type here: Google reshuffles payloads and
+        moves gates without notice. `docs/REVERSE-ENGINEERING.md` documents the
+        method for re-cracking a surface — findings from your own capture are
+        very welcome in the report.
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Search (web)
+        - Search (images)
+        - Maps
+        - YouTube
+        - Trends
+        - News
+        - Suggest
+        - Patents
+        - Books
+        - Scholar
+        - Core (client, cookies, proxies)
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproducer
+      description: The smallest call that misbehaves, plus what you got back.
+      render: python
+      placeholder: |
+        from gscrape import Maps
+        Maps(hl="de", gl="de").search("bäckerei lübeck", limit=20)
+        # -> [] , expected ~20 places
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: What the raw response looks like
+      description: >
+        Response size, the first 200 characters, whether it is the JS shell, a
+        captcha, or valid JSON with a changed shape. Run with `verbose=True`.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: gscrape version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: geo
+    attributes:
+      label: Egress country and hl/gl used
+      description: Gates and layouts differ per country; this matters.
+      placeholder: "DE, hl=de gl=de"
+    validations:
+      required: true

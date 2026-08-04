@@ -1,0 +1,32 @@
+name: New surface or feature
+description: Ask for another Google surface, or a capability on an existing one.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What you want to scrape
+      description: >
+        Name the surface and the fields you need. If you already know which
+        endpoint the web app calls, say so — that is most of the work.
+    validations:
+      required: true
+
+  - type: textarea
+    id: usecase
+    attributes:
+      label: What you would do with it
+      description: Concrete use cases shape the API more than feature lists do.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Reality check
+      options:
+        - label: The data is visible to a logged-out user in a normal browser.
+          required: true
+        - label: It is not behind a paid Google API.
+          required: true
