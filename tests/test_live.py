@@ -118,6 +118,20 @@ class TestYouTube:
         assert yt.channel("@MrBeast")["channel_id"].startswith("UC")
         assert yt.channel_videos("@MrBeast", limit=5)
 
+    def test_transcript(self):
+        # A TED talk: long, always captioned, and not going anywhere.
+        yt = YouTube(hl="en", gl="US", rate_limit=0.5)
+        tracks = yt.caption_tracks("8jPQjjsBbIc")
+        assert tracks and all(t["base_url"] for t in tracks)
+        sub = yt.transcript("8jPQjjsBbIc", tracks=tracks)
+        assert sub["cues"] and sub["duration_s"] > 60
+        assert len(sub["text"]) > 1000
+
+    def test_video_carries_the_transcript(self):
+        d = YouTube(hl="en", gl="US", rate_limit=0.5).video("8jPQjjsBbIc")
+        assert d["published"] and d["duration_s"] > 0
+        assert d["captions"] and d["transcript"]
+
 
 class TestPatents:
     def test_search(self):

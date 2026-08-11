@@ -134,6 +134,33 @@ median = views[len(views) // 2]
 outliers = [v for v in videos if (v["views"] or 0) > median * 3]
 ```
 
+## YouTube: read what the winners actually say
+
+```python
+from pathlib import Path
+
+from gscrape import YouTube
+from gscrape.youtube import to_srt
+
+yt = YouTube(hl="de", gl="DE", rate_limit=0.5)  # timedtext 429s early
+
+# The hooks of this week's top Shorts: the first ~10 seconds of each script
+for row in yt.shorts("fitness motivation", limit=20, sort="views"):
+    try:
+        sub = yt.transcript(row["video_id"], lang="de")
+    except Exception:  # no captions on this one
+        continue
+    hook = " ".join(c["text"] for c in sub["cues"] if c["start"] < 10)
+    print(row["views"], hook)
+
+# One English video as a German subtitle file
+sub = yt.transcript("dQw4w9WgXcQ", lang="de")
+Path("sub.de.srt").write_text(to_srt(sub["cues"]), encoding="utf-8")
+```
+
+`video()` already carries the transcript, so a single call gives metadata and
+script together — feed that straight to an LLM for summaries or script mining.
+
 ## Monitoring a place over time
 
 ```python

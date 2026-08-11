@@ -117,10 +117,45 @@ filter is one), which is a server-side quirk, not an encoding bug.
 Result rows carry `kind` (`video`/`short`/`channel`/`playlist`), ids, title,
 channel, `views` (parsed int) and `views_text`, `published_text`, `thumbnail`.
 
-### `video(video_id)`
+### `video(video_id, *, transcript=True, lang=None, translate=None)`
 
 Exact `published`/`uploaded` dates, `duration_s`, `views`, `keywords`,
 `category`, `available_countries` — the things search only approximates.
+
+Subtitles ride along by default: `captions` lists the track languages,
+`transcript` holds the plain text, `transcript_language` and `transcript_kind`
+(`manual`/`auto`) say what was picked. `transcript=False` skips the two extra
+requests. A video without captions gets `transcript: None`; so does one whose
+caption fetch fails, because losing the metadata over a subtitle is the worse
+trade.
+
+### `caption_tracks(video_id)` / `transcript(video_id, *, lang=None, translate=None)`
+
+`caption_tracks()` lists every track: `language`, `name`, `kind`
+(`manual` for uploaded subtitles, `auto` for speech recognition), `translatable`.
+
+`transcript()` returns `{language, language_name, kind, translated_to,
+duration_s, text, cues}` with each cue `{start, dur, text}` in seconds.
+Track choice: the asked-for `lang`, else `hl`, else English, else the first
+track — manual beating auto at each step. If `lang` exists nowhere but the
+chosen track is translatable, YouTube machine-translates it (`translate=` forces
+that regardless).
+
+`to_srt(cues)` and `to_vtt(cues)` write subtitle files; both cut cues at the
+next cue's start, because auto-generated tracks roll and would otherwise render
+doubled.
+
+**Why the IOS client.** The WEB player answers `UNPLAYABLE` for a growing share
+of videos and then carries no `captions` block, and the caption URLs on a watch
+page are signed for that browser session — anyone else gets HTTP 200 with an
+empty body. The IOS player still hands out plain `timedtext` URLs, so caption
+lookups use it (`CAPTION_CLIENT`) while metadata stays on WEB. Client versions
+are load-bearing: IOS 19.x and ANDROID 19.x are refused with HTTP 400 since
+2025, so both are pinned to 20.x builds.
+
+The `timedtext` host rate-limits harder than InnerTube does: a few hundred
+transcript fetches in a row earn 429s, so bulk runs want `rate_limit=0.5` or a
+proxy pool.
 
 ### `channel(channel)` / `channel_videos(channel, *, tab="videos", limit=30)`
 

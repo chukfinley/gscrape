@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- YouTube subtitles: `YouTube.caption_tracks()` lists the tracks,
+  `YouTube.transcript()` returns timed cues plus plain text, and `to_srt()` /
+  `to_vtt()` write subtitle files. Missing languages are machine-translated
+  through YouTube's own `tlang`. From the shell:
+  `gscrape yt transcript <id> [--lang de] [--translate en] [--to srt|vtt|text]`
+  and `--list` for the track list.
+- `YouTube.video()` now pulls the transcript along with the metadata
+  (`captions`, `transcript`, `transcript_language`, `transcript_kind`);
+  `--no-transcript` / `transcript=False` opts out.
+- CLI parity with the library: every public method now has a command.
+  `maps resolve`, `maps url`, `trends countries`, `trends autocomplete`,
+  `yt hot`, `suggest --modifiers/--expand/--prefix/--lang/--workers`,
+  `patents --count`, `books --id`, `scholar --cites`, `search --safe`,
+  `search --images` through a `cx` engine, and `gscrape version`.
+- `install.sh` — installs the CLI globally (`uv tool install --editable`) and
+  registers `skill/SKILL.md` as a Claude Code skill for every project.
+
+### Fixed
+
+- The `ios` and `android` InnerTube clients answered HTTP 400 on every call;
+  YouTube dropped support for their 19.x versions. Both are pinned to 20.x
+  builds now, which is also what makes caption lookups possible.
+
 ## [0.1.0] - 2026-08-05
 
 First public release.

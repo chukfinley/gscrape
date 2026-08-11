@@ -7,7 +7,10 @@
     gscrape trends interest laufschuhe sneaker --geo DE --csv
     gscrape trends now --geo DE
     gscrape yt search "fitness" --type shorts --sort views --limit 40
-    gscrape patents "running shoe sole" --after 20220101
+    gscrape yt hot "fitness" --since week --limit 20
+    gscrape yt video dQw4w9WgXcQ                       # metadata + subtitles
+    gscrape yt transcript dQw4w9WgXcQ --to srt --out sub.srt
+    gscrape patents "running shoe sole" --after 20220101 --count
 
 Global flags come before the subcommand's own: `--hl`, `--gl`, `--proxy`,
 `--rate-limit`, `--format`, `--out`, `-v`.
@@ -106,6 +109,16 @@ def build_parser() -> argparse.ArgumentParser:
     m_rev.add_argument("--limit", type=int, default=100)
     m_rev.add_argument("--bgkey", help="x-maps-bgkey, or set $GSCRAPE_MAPS_BGKEY")
 
+    m_res = maps_sub.add_parser(
+        "resolve", help="placeId -> feature id + coordinates", parents=[common]
+    )
+    m_res.add_argument("place_id", help="ChIJ...")
+
+    m_url = maps_sub.add_parser(
+        "url", help="print the internal search URL for a query", parents=[common]
+    )
+    m_url.add_argument("query")
+
     maps_sub.add_parser("bootstrap", help="refresh the consent cookies", parents=[common])
 
     # --------------------------------------------------------------- suggest
@@ -119,6 +132,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sug.add_argument("--alphabet", action="store_true")
     sug.add_argument("--questions", action="store_true")
+    sug.add_argument("--modifiers", action="store_true", help="commercial-intent terms")
+    sug.add_argument(
+        "--expand",
+        nargs="+",
+        metavar="TERM",
+        help="one call per term, merged (e.g. --expand test kaufen vs)",
+    )
+    sug.add_argument(
+        "--prefix", action="store_true", help="put --expand terms in front of the query"
+    )
+    sug.add_argument(
+        "--lang", help="word list for --questions/--modifiers (default: --hl)"
+    )
+    sug.add_argument("--workers", type=int, default=8)
     sug.add_argument("--detailed", action="store_true", help="with relevance scores")
 
     # ------------------------------------------------------------------ news
@@ -166,6 +193,32 @@ def build_parser() -> argparse.ArgumentParser:
     t_rel.add_argument("--timeframe", default="today 12-m")
     t_rel.add_argument("--topics", action="store_true", help="entities, not queries")
 
+    t_cty = tr_sub.add_parser(
+        "countries", help="one run per country, keyed by geo", parents=[common]
+    )
+    t_cty.add_argument("keywords", nargs="+")
+    t_cty.add_argument(
+        "--countries",
+        required=True,
+        help="comma separated geos, e.g. DE,AT,CH",
+    )
+    t_cty.add_argument(
+        "--method",
+        default="interest_over_time",
+        choices=(
+            "interest_over_time",
+            "interest_by_region",
+            "related_queries",
+            "related_topics",
+        ),
+    )
+    t_cty.add_argument("--timeframe", default="today 12-m")
+
+    t_ac = tr_sub.add_parser(
+        "autocomplete", help="resolve a term to Knowledge topics (mid)", parents=[common]
+    )
+    t_ac.add_argument("query")
+
     t_now = tr_sub.add_parser("now", help="trending right now", parents=[common])
     t_now.add_argument("--geo", default="DE")
     t_now.add_argument("--hours", type=int, default=48)
@@ -198,8 +251,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     y_search.add_argument("--limit", type=int, default=20)
 
-    y_video = yt_sub.add_parser("video", parents=[common])
+    y_video = yt_sub.add_parser(
+        "video", help="metadata plus the subtitles", parents=[common]
+    )
     y_video.add_argument("video_id")
+    y_video.add_argument(
+        "--no-transcript",
+        dest="transcript",
+        action="store_false",
+        help="metadata only (saves two requests)",
+    )
+    y_video.add_argument("--lang", help="preferred transcript language (default: --hl)")
+    y_video.add_argument("--translate", help="machine-translate the transcript into")
+
+    y_sub = yt_sub.add_parser(
+        "transcript", help="subtitles of one video", parents=[common]
+    )
+    y_sub.add_argument("video_id")
+    y_sub.add_argument("--lang", help="wanted language, e.g. de (default: --hl)")
+    y_sub.add_argument("--translate", help="machine-translate into this language")
+    y_sub.add_argument(
+        "--to",
+        default="json",
+        choices=("json", "text", "srt", "vtt"),
+        help="json keeps the timed cues, the rest are subtitle files (default: json)",
+    )
+    y_sub.add_argument(
+        "--list",
+        dest="list_tracks",
+        action="store_true",
+        help="only list the available caption tracks",
+    )
 
     y_chan = yt_sub.add_parser("channel", parents=[common])
     y_chan.add_argument("channel", help="@handle, UC... id or channel URL")
@@ -213,6 +295,17 @@ def build_parser() -> argparse.ArgumentParser:
     y_pl.add_argument("playlist_id")
     y_pl.add_argument("--limit", type=int, default=100)
 
+    y_hot = yt_sub.add_parser(
+        "hot",
+        help="recent uploads ranked by views (no trending feed left)",
+        parents=[common],
+    )
+    y_hot.add_argument("query")
+    y_hot.add_argument(
+        "--since", default="today", choices=("hour", "today", "week", "month", "year")
+    )
+    y_hot.add_argument("--limit", type=int, default=20)
+
     # --------------------------------------------------------- other surfaces
     pat = sub.add_parser(
         "patents", help="Google Patents (JSON, un-gated)", parents=[common]
@@ -224,20 +317,27 @@ def build_parser() -> argparse.ArgumentParser:
     pat.add_argument("--assignee")
     pat.add_argument("--inventor")
     pat.add_argument("--country", help="US,DE,EP")
+    pat.add_argument(
+        "--count", action="store_true", help="only the total match count, no rows"
+    )
 
     books = sub.add_parser("books", help="Google Books", parents=[common])
-    books.add_argument("query")
+    books.add_argument("query", nargs="?")
     books.add_argument("--limit", type=int, default=20)
     books.add_argument("--author")
     books.add_argument("--isbn")
+    books.add_argument("--id", dest="volume_id", help="fetch one volume by Books id")
 
     sch = sub.add_parser(
         "scholar", help="Google Scholar (rate limits hard)", parents=[common]
     )
-    sch.add_argument("query")
+    sch.add_argument("query", nargs="?")
     sch.add_argument("--limit", type=int, default=10)
     sch.add_argument("--year-from", dest="year_from", type=int)
     sch.add_argument("--recent", action="store_true", help="sort by date")
+    sch.add_argument(
+        "--cites", help="papers citing this cluster_id (from a search result)"
+    )
 
     web = sub.add_parser(
         "search", help="Web search (needs a browser cookie jar)", parents=[common]
@@ -252,6 +352,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     web.add_argument("--cx", help="use Programmable Search instead ($GSCRAPE_CSE_CX)")
     web.add_argument("--images", action="store_true", help="image results")
+    web.add_argument(
+        "--safe", default="off", choices=("off", "active"), help="SafeSearch for --images"
+    )
+
+    sub.add_parser(
+        "version", help="print the installed gscrape version", parents=[common]
+    )
 
     cookies = sub.add_parser(
         "cookies",
@@ -290,6 +397,10 @@ def run(a: argparse.Namespace) -> Any:
             return m.details_many(refs, workers=a.workers)
         if a.action == "reviews":
             return m.reviews(a.fid, limit=a.limit)
+        if a.action == "resolve":
+            return m.resolve(a.place_id)
+        if a.action == "url":
+            return {"url": m.search_url(a.query)}
         if a.action == "bootstrap":
             m.bootstrap(force=True)
             return {"cookies": str(m.client.cookie_file), "ok": True}
@@ -298,12 +409,17 @@ def run(a: argparse.Namespace) -> Any:
         from .suggest import Suggest
 
         s = Suggest(**kw)
+        exp = {"ds": a.ds, "workers": a.workers}
         if a.sweep:
-            return s.sweep(a.query)
+            return s.sweep(a.query, **exp)
         if a.alphabet:
-            return s.alphabet(a.query, ds=a.ds)
+            return s.alphabet(a.query, **exp)
         if a.questions:
-            return s.questions(a.query, ds=a.ds)
+            return s.questions(a.query, lang=a.lang, **exp)
+        if a.modifiers:
+            return s.modifiers(a.query, lang=a.lang, **exp)
+        if a.expand:
+            return s.expand(a.query, a.expand, prefix=a.prefix, **exp)
         return s.suggest(a.query, ds=a.ds, detailed=a.detailed)
 
     if a.command == "news":
@@ -343,6 +459,11 @@ def run(a: argparse.Namespace) -> Any:
         if a.action == "related":
             fn = t.related_topics if a.topics else t.related_queries
             return fn(a.keywords, geo=a.geo, timeframe=a.timeframe)
+        if a.action == "countries":
+            geos = [g.strip() for g in a.countries.split(",") if g.strip()]
+            return t.by_country(a.keywords, geos, method=a.method, timeframe=a.timeframe)
+        if a.action == "autocomplete":
+            return t.autocomplete(a.query)
         if a.action == "now":
             if a.rss:
                 return t.trending_rss(geo=a.geo, limit=a.limit)
@@ -363,38 +484,75 @@ def run(a: argparse.Namespace) -> Any:
                 limit=a.limit,
             )
         if a.action == "video":
-            return y.video(a.video_id)
+            return y.video(
+                a.video_id,
+                transcript=a.transcript,
+                lang=a.lang,
+                translate=a.translate,
+            )
+        if a.action == "transcript":
+            from .youtube import to_srt, to_vtt
+
+            if a.list_tracks:
+                return y.caption_tracks(a.video_id)
+            sub = y.transcript(a.video_id, lang=a.lang, translate=a.translate)
+            if a.to == "text":
+                return sub["text"]
+            if a.to == "srt":
+                return to_srt(sub["cues"])
+            if a.to == "vtt":
+                return to_vtt(sub["cues"])
+            return sub
         if a.action == "channel":
             if a.videos:
                 return y.channel_videos(a.channel, tab=a.tab, limit=a.limit)
             return y.channel(a.channel)
         if a.action == "playlist":
             return y.playlist(a.playlist_id, limit=a.limit)
+        if a.action == "hot":
+            return y.hot(a.query, since=a.since, limit=a.limit)
 
     if a.command == "patents":
         from .patents import Patents
 
-        return Patents(**kw).search(
-            a.query,
-            limit=a.limit,
-            after=a.after,
-            before=a.before,
-            assignee=a.assignee,
-            inventor=a.inventor,
-            country=a.country,
-        )
+        p = Patents(**kw)
+        filters = {
+            "after": a.after,
+            "before": a.before,
+            "assignee": a.assignee,
+            "inventor": a.inventor,
+            "country": a.country,
+        }
+        if a.count:
+            return {"query": a.query, "total": p.count(a.query, **filters)}
+        return p.search(a.query, limit=a.limit, **filters)
 
     if a.command == "books":
         from .books import Books
 
-        return Books(**kw).search(a.query, limit=a.limit, author=a.author, isbn=a.isbn)
+        b = Books(**kw)
+        if a.volume_id:
+            return b.get(a.volume_id)
+        if not a.query:
+            raise SystemExit("books: give a query or --id")
+        return b.search(a.query, limit=a.limit, author=a.author, isbn=a.isbn)
 
     if a.command == "scholar":
         from .scholar import Scholar
 
-        return Scholar(**kw).search(
+        s = Scholar(**kw)
+        if a.cites:
+            return s.citations(a.cites)
+        if not a.query:
+            raise SystemExit("scholar: give a query or --cites")
+        return s.search(
             a.query, limit=a.limit, year_from=a.year_from, sort_by_date=a.recent
         )
+
+    if a.command == "version":
+        from . import __version__
+
+        return {"gscrape": __version__}
 
     if a.command == "cookies":
         from ._core.client import Client
@@ -413,7 +571,9 @@ def run(a: argparse.Namespace) -> Any:
         if a.ai:
             return s.ai_overview(a.query)
         if a.images:
-            return s.images(a.query, limit=a.limit)
+            if s.cx:  # Programmable Search needs no browser jar
+                return s.cse_images(a.query, limit=a.limit)
+            return s.images(a.query, limit=a.limit, safe=a.safe)
         if s.cx:
             return s.cse(a.query, limit=a.limit, site=a.site)
         return s.web(a.query, limit=a.limit, site=a.site, when=a.when, clean=not a.raw)

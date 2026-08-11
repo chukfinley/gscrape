@@ -3,7 +3,7 @@
 # gscrape
 
 **Fast, pure-HTTP scrapers for Google's public surfaces.**
-Search · Maps · YouTube · Trends · News · Images · Autocomplete · Patents · Books · Scholar
+Search · Maps · YouTube (incl. subtitles) · Trends · News · Images · Autocomplete · Patents · Books · Scholar
 
 [![CI](https://github.com/chukfinley/gscrape/actions/workflows/ci.yml/badge.svg)](https://github.com/chukfinley/gscrape/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/gscrape.svg)](https://pypi.org/project/gscrape/)
@@ -26,6 +26,7 @@ from gscrape import Maps, Search, Suggest, Trends, YouTube
 Search().web("beste laufschuhe", limit=100)  # 10 SERP pages, parallel, ~2 s
 Maps().search("bäckerei lübeck", limit=60)  # 60 places with contact data, ~2 s
 YouTube().search("fitness", type="shorts", sort="views", upload_date="week")
+YouTube().transcript("dQw4w9WgXcQ", lang="de")  # subtitles, translated if needed
 Trends().interest_over_time(["laufschuhe", "sneaker"], geo="DE")
 Suggest().sweep("laufschuhe")  # ~250 queries people really type
 ```
@@ -36,6 +37,7 @@ Same from the shell:
 gscrape search "beste laufschuhe" --limit 100 --format csv --out serp.csv
 gscrape maps search "bäckerei lübeck" --limit 60 --format csv --out places.csv
 gscrape yt search fitness --type shorts --sort views --limit 40
+gscrape yt transcript dQw4w9WgXcQ --to srt --out sub.srt
 gscrape trends interest laufschuhe --geo DE --csv --out trend.csv
 ```
 
@@ -48,6 +50,17 @@ uv add gscrape        # or: pip install gscrape
 ```
 
 Python 3.11+. Two runtime dependencies: `curl_cffi` and `selectolax`.
+
+### As a global CLI (and as a Claude Code skill)
+
+```bash
+./install.sh
+```
+
+Puts `gscrape` on `PATH` via `uv tool install --editable` (a `git pull` updates
+it, no reinstall) and links [`skill/SKILL.md`](skill/SKILL.md) into
+`~/.claude/skills/gscrape/`, so every agent in every project can reach the same
+commands. Re-running the script is safe.
 
 ## Status of each surface
 
@@ -63,6 +76,7 @@ records how every verdict here was reached and how to re-check it.
 | Maps text search, paginated and deduplicated | `Maps.search` | ✅ |
 | Maps deep review pagination | `Maps.reviews` | ⚠️ needs a BotGuard key you supply |
 | YouTube search, Shorts, channels, playlists | `YouTube` | ✅ |
+| YouTube subtitles, uploaded and auto-generated, machine-translated | `YouTube.transcript` | ✅ |
 | Autocomplete + keyword sweeps, per vertical | `Suggest` | ✅ |
 | News search, topics, geo, real publisher URLs | `News` | ✅ |
 | Trends: interest, regions, related, trending, CSV export | `Trends` | ✅ |

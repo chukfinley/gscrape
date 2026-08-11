@@ -8,8 +8,20 @@ key baked into every youtube.com page, identical for every visitor.
     yt = YouTube(hl="de", gl="DE")
     yt.search("laufschuhe test", limit=40)
     yt.search("fitness", type="shorts", upload_date="week", sort="views")
-    yt.video("dQw4w9WgXcQ")
+    yt.video("dQw4w9WgXcQ")             # metadata + transcript
+    yt.transcript("dQw4w9WgXcQ", lang="de")
     yt.channel_videos("@MrBeast", limit=60)
+
+## Captions come from the mobile clients, not the web one
+
+The WEB client answers `playabilityStatus: UNPLAYABLE` for a growing share of
+videos and then carries no `captions` block at all, and the caption URLs on a
+watch page are signed for the browser session (they answer 200 with an empty
+body for anyone else). The IOS client still returns a plain, unsigned
+`timedtext` URL that any client can fetch, so `transcript()` asks IOS for the
+track list and reads `fmt=json3` off it. Client versions matter: IOS 19.x and
+ANDROID 19.x are rejected with HTTP 400 since 2025, so both are pinned to a 20.x
+build here.
 
 ## Search filters are protobuf, not magic strings
 
@@ -41,7 +53,7 @@ import urllib.parse
 from collections.abc import Iterator
 from typing import Any
 
-from ._core.errors import NotFound, ParseError
+from ._core.errors import GoogError, NotFound, ParseError
 from ._core.parse import safe_get
 from ._core.service import Service
 
@@ -50,18 +62,33 @@ INNERTUBE = "https://www.youtube.com/youtubei/v1"
 WEB_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
 WEB_VERSION = "2.20240101.00.00"
 
-# `clientName` decides what YouTube hands back. WEB is the richest; ANDROID and
-# IOS return stream URLs the web client hides, at the cost of thinner metadata.
+# `clientName` decides what YouTube hands back. WEB is the richest for metadata;
+# ANDROID and IOS return caption tracks and stream URLs the web client hides, at
+# the cost of thinner metadata (no microformat, so no publish date or category).
 CLIENTS = {
     "web": {"clientName": "WEB", "clientVersion": WEB_VERSION},
     "android": {
         "clientName": "ANDROID",
-        "clientVersion": "19.09.37",
-        "androidSdkVersion": 30,
+        "clientVersion": "20.10.38",
+        "androidSdkVersion": 34,
+        "osName": "Android",
+        "osVersion": "14",
     },
-    "ios": {"clientName": "IOS", "clientVersion": "19.09.3"},
+    "ios": {
+        "clientName": "IOS",
+        "clientVersion": "20.03.02",
+        "deviceMake": "Apple",
+        "deviceModel": "iPhone16,2",
+        "osName": "iPhone",
+        "osVersion": "18.2.1.22C161",
+    },
     "tv": {"clientName": "TVHTML5_SIMPLY_EMBEDDED_PLAYER", "clientVersion": "2.0"},
 }
+
+#: The client asked for caption tracks. WEB no longer carries them.
+CAPTION_CLIENT = "ios"
+
+TIMEDTEXT_FORMAT = "json3"
 
 SORT = {"relevance": 0, "rating": 1, "date": 2, "views": 3}
 UPLOAD_DATE = {"hour": 1, "today": 2, "week": 3, "month": 4, "year": 5}
@@ -179,6 +206,71 @@ def _number(text: str | None) -> int | None:
     return int(value * _MULTIPLIER.get(suffix, 1))
 
 
+def parse_json3(data: dict) -> list[dict]:
+    """YouTube's `fmt=json3` timedtext -> `[{start, dur, text}]` in seconds.
+
+    A json3 event carries its text in word-level `segs`, and window/style events
+    carry none at all. Joining the segments per event rebuilds the caption line
+    the player shows; events that end up empty are dropped, because
+    auto-generated tracks emit a blank spacer event between every line.
+    """
+    cues: list[dict] = []
+    for event in data.get("events") or []:
+        text = "".join(s.get("utf8", "") for s in event.get("segs") or [])
+        text = text.replace("\n", " ").strip()
+        if not text:
+            continue
+        cues.append(
+            {
+                "start": round((event.get("tStartMs") or 0) / 1000, 3),
+                "dur": round((event.get("dDurationMs") or 0) / 1000, 3),
+                "text": text,
+            }
+        )
+    return cues
+
+
+def _stamp(seconds: float, *, comma: bool = False) -> str:
+    ms = round(seconds * 1000)
+    h, ms = divmod(ms, 3_600_000)
+    m, ms = divmod(ms, 60_000)
+    s, ms = divmod(ms, 1000)
+    sep = "," if comma else "."
+    return f"{h:02d}:{m:02d}:{s:02d}{sep}{ms:03d}"
+
+
+def _timed(cues: list[dict]) -> Iterator[tuple[float, float, str]]:
+    """Cues as non-overlapping `(start, end, text)` spans.
+
+    Auto-generated tracks roll: every line stays on screen until two lines
+    later, so raw json3 spans overlap by design. A subtitle file with
+    overlapping cues renders as doubled lines in most players, so each span is
+    cut at the start of the next one.
+    """
+    for i, c in enumerate(cues):
+        end = c["start"] + c["dur"]
+        if i + 1 < len(cues):
+            end = min(end, cues[i + 1]["start"])
+        yield c["start"], max(end, c["start"]), c["text"]
+
+
+def to_srt(cues: list[dict]) -> str:
+    """Cues as an `.srt` subtitle file."""
+    return "\n".join(
+        f"{i}\n{_stamp(start, comma=True)} --> {_stamp(end, comma=True)}\n{text}\n"
+        for i, (start, end, text) in enumerate(_timed(cues), 1)
+    )
+
+
+def to_vtt(cues: list[dict]) -> str:
+    """Cues as a `.vtt` subtitle file."""
+    body = "\n".join(
+        f"{_stamp(start)} --> {_stamp(end)}\n{text}\n"
+        for start, end, text in _timed(cues)
+    )
+    return f"WEBVTT\n\n{body}"
+
+
 def _walk(node: Any, key: str) -> Iterator[dict]:
     """Yield every `key` renderer anywhere in a response.
 
@@ -204,21 +296,26 @@ class YouTube(Service):
 
     # ------------------------------------------------------------- transport
 
-    def _context(self) -> dict:
+    def _context(self, client_name: str | None = None) -> dict:
         return {
             "client": {
-                **CLIENTS[self.client_name],
+                **CLIENTS[client_name or self.client_name],
                 "hl": self.hl,
                 "gl": self.gl.upper(),
             }
         }
 
-    def call(self, endpoint: str, body: dict) -> dict:
-        """POST one InnerTube endpoint (`search`, `player`, `browse`, `next`)."""
+    def call(self, endpoint: str, body: dict, *, client_name: str | None = None) -> dict:
+        """POST one InnerTube endpoint (`search`, `player`, `browse`, `next`).
+
+        `client_name` overrides this instance's client for a single call, which
+        is what lets caption lookups borrow the IOS client without changing the
+        client every other method uses.
+        """
         url = f"{INNERTUBE}/{endpoint}?key={WEB_KEY}&prettyPrint=false"
         raw = self.client.post(
             url,
-            json={"context": self._context(), **body},
+            json={"context": self._context(client_name), **body},
             headers={
                 "content-type": "application/json",
                 "origin": "https://www.youtube.com",
@@ -468,14 +565,40 @@ class YouTube(Service):
 
     # ----------------------------------------------------------------- lookup
 
-    def video(self, video_id: str) -> dict:
-        """Full metadata for one video: exact date, description, tags, counts."""
-        data = self.call("player", {"videoId": video_id})
+    def _player(self, video_id: str, *, client_name: str | None = None) -> dict:
+        """One `player` call. `contentCheckOk` keeps age-gated videos answering."""
+        return self.call(
+            "player",
+            {"videoId": video_id, "contentCheckOk": True, "racyCheckOk": True},
+            client_name=client_name,
+        )
+
+    def video(
+        self,
+        video_id: str,
+        *,
+        transcript: bool = True,
+        lang: str | None = None,
+        translate: str | None = None,
+    ) -> dict:
+        """Full metadata for one video: exact date, description, tags, counts.
+
+        The subtitles come along by default (`transcript=False` turns that off
+        and saves two requests): `captions` lists the available track languages,
+        `transcript` holds the plain text of the chosen one. A video without any
+        caption track simply gets `transcript: None` — that is not an error.
+
+        Args:
+            lang: preferred transcript language, e.g. `de`. Defaults to `hl`,
+                then English, then whatever the video has.
+            translate: force YouTube's machine translation into this language.
+        """
+        data = self._player(video_id)
         details = data.get("videoDetails") or {}
         if not details:
             raise NotFound(f"no video {video_id!r} (private, removed or geo-blocked)")
         micro = safe_get(data, "microformat", "playerMicroformatRenderer", default={})
-        return {
+        row = {
             "video_id": details.get("videoId"),
             "title": details.get("title"),
             "url": f"https://www.youtube.com/watch?v={details.get('videoId')}",
@@ -492,6 +615,153 @@ class YouTube(Service):
             "family_safe": micro.get("isFamilySafe"),
             "thumbnail": safe_get(details, "thumbnail", "thumbnails", -1, "url"),
             "available_countries": micro.get("availableCountries", []),
+        }
+        if not transcript:
+            return row
+        # A missing or unfetchable transcript must not cost the caller the
+        # metadata it already paid for, so this failure stays soft.
+        row.update(
+            {
+                "captions": [],
+                "transcript_language": None,
+                "transcript_kind": None,
+                "transcript": None,
+            }
+        )
+        try:
+            tracks = self.caption_tracks(video_id)
+            row["captions"] = [t["language"] for t in tracks]
+            if tracks:
+                sub = self.transcript(
+                    video_id, lang=lang, translate=translate, tracks=tracks
+                )
+                row["transcript_language"] = sub["translated_to"] or sub["language"]
+                row["transcript_kind"] = sub["kind"]
+                row["transcript"] = sub["text"]
+        except GoogError:
+            pass
+        return row
+
+    # --------------------------------------------------------------- captions
+
+    def caption_tracks(self, video_id: str) -> list[dict]:
+        """Every subtitle track a video has, uploaded ones and auto-generated.
+
+        One `player` request against the IOS client. `kind` is `manual` for
+        author-uploaded subtitles and `auto` for YouTube's speech recognition;
+        `translatable` says whether `translate=` can machine-translate it.
+        """
+        data = self._player(video_id, client_name=CAPTION_CLIENT)
+        tracks = (
+            safe_get(
+                data,
+                "captions",
+                "playerCaptionsTracklistRenderer",
+                "captionTracks",
+                default=[],
+            )
+            or []
+        )
+        if not tracks and not (data.get("videoDetails") or {}):
+            status = safe_get(data, "playabilityStatus", "reason") or safe_get(
+                data, "playabilityStatus", "status"
+            )
+            raise NotFound(f"no video {video_id!r} ({status})")
+        return [
+            {
+                "language": t.get("languageCode"),
+                "name": _text(t.get("name")),
+                "kind": "auto" if t.get("kind") == "asr" else "manual",
+                "translatable": bool(t.get("isTranslatable")),
+                "base_url": t.get("baseUrl"),
+            }
+            for t in tracks
+            if t.get("baseUrl")
+        ]
+
+    def _pick_track(
+        self, tracks: list[dict], lang: str | None
+    ) -> tuple[dict, str | None]:
+        """Choose a track and decide whether it needs translating.
+
+        Preference order: the asked-for language, then `hl`, then English, then
+        the first track — manual subtitles beating auto-generated ones at every
+        step. When the wanted language exists nowhere but the fallback track is
+        translatable, the caller gets that track plus a `tlang` to translate it
+        into, which is exactly what the YouTube player does.
+        """
+        if not tracks:
+            raise NotFound("no caption track on this video")
+
+        def by_lang(code: str) -> list[dict]:
+            code = code.lower().split("-")[0]
+            hits = [
+                t for t in tracks if (t["language"] or "").lower().split("-")[0] == code
+            ]
+            return sorted(hits, key=lambda t: t["kind"] != "manual")
+
+        if lang:
+            hits = by_lang(lang)
+            if hits:
+                return hits[0], None
+        for code in (self.hl, "en"):
+            hits = by_lang(code)
+            if hits:
+                return hits[0], lang if lang else None
+        fallback = sorted(tracks, key=lambda t: t["kind"] != "manual")[0]
+        return fallback, lang if lang else None
+
+    def transcript(
+        self,
+        video_id: str,
+        *,
+        lang: str | None = None,
+        translate: str | None = None,
+        tracks: list[dict] | None = None,
+    ) -> dict:
+        """The subtitles of one video as timed cues plus one block of text.
+
+        Args:
+            lang: wanted language (`de`). Falls back to `hl`, then English, then
+                the first track; if the language is missing entirely but the
+                track can be translated, it is translated into `lang`.
+            translate: force machine translation into this language, whatever
+                the source track is.
+            tracks: a `caption_tracks()` result to reuse instead of re-fetching.
+
+        Returns:
+            `{video_id, language, language_name, kind, translated_to, cues,
+            text, duration_s}`, where each cue is `{start, dur, text}` in
+            seconds.
+        """
+        tracks = tracks if tracks is not None else self.caption_tracks(video_id)
+        track, auto_translate = self._pick_track(tracks, lang)
+        tlang = translate or auto_translate
+        if tlang and not track["translatable"]:
+            tlang = None
+        url = f"{track['base_url']}&fmt={TIMEDTEXT_FORMAT}"
+        if tlang:
+            url += f"&tlang={urllib.parse.quote(tlang)}"
+        raw = self.client.get(url)
+        if not raw.strip():
+            raise ParseError(
+                f"timedtext returned an empty body for {video_id!r} — the track "
+                "URL is session-signed, retry without a proxy or with a fresh call"
+            )
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise ParseError(f"timedtext returned non-JSON for {video_id!r}") from e
+        cues = parse_json3(data)
+        return {
+            "video_id": video_id,
+            "language": track["language"],
+            "language_name": track["name"],
+            "kind": track["kind"],
+            "translated_to": tlang,
+            "duration_s": round(cues[-1]["start"] + cues[-1]["dur"], 3) if cues else 0.0,
+            "text": "\n".join(c["text"] for c in cues),
+            "cues": cues,
         }
 
     def resolve_channel(self, channel: str) -> str:
@@ -637,4 +907,4 @@ class YouTube(Service):
         return out
 
 
-__all__ = ["YouTube", "search_params"]
+__all__ = ["YouTube", "parse_json3", "search_params", "to_srt", "to_vtt"]
